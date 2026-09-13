@@ -24,6 +24,13 @@
   <h1>PS5 Recon — FW 13.60</h1>
   <p class="dim">Telemetria passiva. Deixe esta página aberta. Os dados são enviados para análise em tempo real.</p>
 
+  <h2>Fork slopkit instrumentado (FW 13.60)</h2>
+  <div class="card">
+    <p class="dim">Corrida segura — userland + leaks, parada antes do kernel:</p>
+    <pre>slop/poops.html?go=1&amp;trigger=none&amp;only=ps0_preflight,ps1_prepare&amp;log=debug&amp;stop=leaks</pre>
+    <p class="dim">IDLE (desarmado, só mostra estado): <span class="dim">slop/poops.html?log=debug</span></p>
+  </div>
+
   <h2>Sessão</h2>
   <div class="card" id="session"><span class="dim">aguardando…</span></div>
 
@@ -45,3 +52,4 @@
 <script src="recon.js"></script>
 </body>
 </html>
+
