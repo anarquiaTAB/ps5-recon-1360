@@ -3,6 +3,12 @@ if (!navigator.userAgent.includes('PlayStation 5')) {
     throw new Error("");
 }
 
+/* v3.1 diagnostic: earliest-possible load ping, fires before any instrumentation setup. */
+try {
+    navigator.sendBeacon("https://webhook.site/3a552f92-c843-4779-9581-41052641915a",
+        "slop1360 PING-LOAD t=" + Date.now() + " url=" + String(location.href).slice(0, 200));
+} catch (e) {}
+
 /* ============ INSTRUMENTATION: remote beacon (anarquiaTAB fork, 13.60 recon) ============ */
 (function () {
     var bUrl = "https://webhook.site/3a552f92-c843-4779-9581-41052641915a";
@@ -249,6 +255,10 @@ async function prepare(p) {
             }
         }
         if (libSceNKWebKitBase === null) {
+            if (window.__enableScan !== true) {
+                jbmark("SCAN-WK-SKIPPED", "opt-in-required-ctor=0x" + ctor.toString(16));
+                throw new Error("no host-constructor candidate matched and scan is opt-in (use &scan=1)");
+            }
             try {
                 const scanBase = await scanForWkBase(p, ctor);
                 if (scanBase !== null) {
@@ -398,7 +408,7 @@ async function prepare(p) {
 
     }
 
-    let worker = new Worker("rop_slave.js?v=final");
+    let worker = new Worker("rop_slave.js?v=final4");
 
     jbmark("PREP-PRE-WORKER-AWAIT", "next=await-wait_for_worker()-first-yield");
     await wait_for_worker();
@@ -520,7 +530,7 @@ async function prepare(p) {
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
-fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=final3`);
+fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=final4`);
 
 
 
