@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html manifest="cache.appcache" lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PS5 Recon 13.60</title>
+<style>
+  html,body{margin:0;padding:0;background:#0c111b;color:#d8dee9;font-family:Segoe UI,Arial,sans-serif;min-height:100vh}
+  .wrap{max-width:640px;margin:0 auto;padding:16px}
+  h1{font-size:22px;color:#4fc3f7;margin:8px 0}
+  h2{font-size:15px;color:#81d4fa;margin:14px 0 6px;border-bottom:1px solid #263238;padding-bottom:4px}
+  .card{background:#121a29;border:1px solid #1e2a3a;border-radius:8px;padding:10px 12px;margin:8px 0;word-break:break-all}
+  .badge{display:inline-block;background:#1b2838;border:1px solid #2a3b52;border-radius:4px;padding:2px 8px;margin:2px;font-size:12px}
+  .ok{color:#66bb6a}.warn{color:#ffa726}.err{color:#ef5350}.dim{color:#78909c}
+  pre{white-space:pre-wrap;font-size:11px;color:#90a4ae}
+  #status{position:fixed;top:0;left:0;right:0;padding:6px 12px;font-size:12px;text-align:center;z-index:9}
+  #status.on{background:#1b5e20;color:#c8e6c9}
+  #status.off{background:#4a148c;color:#e1bee7}
+</style>
+</head>
+<body>
+<div id="status" class="off">● conectando…</div>
+<div class="wrap">
+  <h1>PS5 Recon — FW 13.60</h1>
+  <p class="dim">Telemetria passiva. Deixe esta página aberta. Os dados são enviados para análise em tempo real.</p>
+
+  <h2>Sessão</h2>
+  <div class="card" id="session"><span class="dim">aguardando…</span></div>
+
+  <h2>Firmware &amp; Browser</h2>
+  <div class="card" id="fw"><span class="dim">aguardando…</span></div>
+
+  <h2>Hardware / GPU / Tela</h2>
+  <div class="card" id="hw"><span class="dim">aguardando…</span></div>
+
+  <h2>Capabilities (probes)</h2>
+  <div class="card" id="caps"><span class="dim">aguardando…</span></div>
+
+  <h2>Fingerprint</h2>
+  <div class="card" id="fp"><span class="dim">aguardando…</span></div>
+
+  <h2>Beacon status</h2>
+  <div class="card"><pre id="log">—</pre></div>
+</div>
+<script src="recon.js"></script>
+</body>
+</html>
