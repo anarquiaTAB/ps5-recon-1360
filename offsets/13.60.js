@@ -2,7 +2,11 @@
 // libSceLibcInternal. file offset = rva + 0x4000
 
 // host-constructor candidates: webkitBase = nativeCtorAddr - hc
-const OFFSET_wk_host_constructor_candidates = [0x0003A888, 0x0003AAD0, 0x0003BB18];
+// 13.60 recon (anarquiaTAB fork, 2026-09-13): ctor % 0x4000 == 0x2A58 verified
+// across 3 runs (04:58 / 04:59 / 05:21) -> the 12.00 host-ctor RVA is still valid
+// on 13.60; webkitBase = ctor - 0x2A58 is confirmed by an ELF-magic read in
+// main.js (no scan). The 12.00 placeholders below are kept as fallbacks.
+const OFFSET_wk_host_constructor_candidates = [0x00002A58, 0x0003A888, 0x0003AAD0, 0x0003BB18];
 // Exact WKDownloadGetTypeID export (NID -x5vK4NNNYM).
 const OFFSET_wk_vtable_first_element     = 0x002617E0;
 const OFFSET_wk_memset_import                  = 0x03510238;
@@ -416,3 +420,4 @@ const OFFSET_KERNEL_TARGETID                    = 0x01AD306D;
 const OFFSET_KERNEL_QA_FLAGS                    = 0x01AD3088;
 const OFFSET_KERNEL_UTOKEN_FLAGS                = 0x01AD30F0;
 const OFFSET_KERNEL_ROOTVNODE                   = 0x03E27510;
+

