@@ -116,6 +116,64 @@ function jbmark(tag, detail) {
     }
 }
 
+function i64Num(num) {
+    return new int64(num % 0x100000000, Math.floor(num / 0x100000000));
+}
+
+// 13.60+ calibration: the per-fw host-constructor RVA table (hc) no longer
+// satisfies the stock page-alignment check, so locate the REAL libSceNKWebKit
+// base by scanning down from the leaked ctor for the ELF signature.
+// ELF header sits at base-0x4000 when PS5 maps "file offset = rva + 0x4000".
+function scanForWkBase(p, ctor) {
+    jbmark("SCAN-WK-START", "ctor=0x" + ctor.toString(16)
+        + "-window=0x1000000-step=0x4000");
+    const MAGIC = 0x464C457F; // "\x7fELF" little-endian u32
+    const WINDOW = 0x1000000;
+    const STEP = 0x4000;
+    let steps = 0;
+    let hits = 0;
+    const startBase = Math.floor((ctor - WINDOW) / STEP) * STEP;
+    for (let B = startBase; B < ctor; B += STEP) {
+        if (B < 0x800000000) break;
+        steps++;
+        let magicHere = -1;
+        let v = null;
+        if (B - STEP >= 0x800000000) {
+            try {
+                v = p.read8(i64Num(B - STEP));
+                if (v.low === MAGIC) magicHere = 0;
+            } catch (e) {}
+        }
+        if (magicHere < 0) {
+            try {
+                v = p.read8(i64Num(B));
+                if (v.low === MAGIC) magicHere = 1;
+            } catch (e) {}
+        }
+        if (magicHere < 0) continue;
+        const elf64 = (v.hi & 0xFF) === 2
+            && ((v.hi >> 8) & 0xFF) === 1
+            && ((v.hi >> 16) & 0xFF) === 1;
+        let gotMemset = "?";
+        let gotGuard = "?";
+        try {
+            gotMemset = "0x" + p.read8(i64Num(B + OFFSET_wk_memset_import)).toString();
+        } catch (e) {}
+        try {
+            gotGuard = "0x" + p.read8(i64Num(B + OFFSET_wk___stack_chk_guard_import)).toString();
+        } catch (e) {}
+        hits++;
+        jbmark("SCAN-WK-HIT", "B=0x" + B.toString(16)
+            + "-hc=0x" + (ctor - B).toString(16)
+            + "-magic=" + (magicHere === 0 ? "atB-0x4000" : "atB")
+            + "-elf64=" + (elf64 ? 1 : 0)
+            + "-gotMemset=" + gotMemset
+            + "-gotGuard=" + gotGuard);
+        if (hits >= 4) break;
+    }
+    jbmark("SCAN-WK-DONE", "steps=" + steps + "-hits=" + hits);
+}
+
 async function prepare(p) {
 
     let textArea = document.createElement("textarea");
@@ -142,9 +200,15 @@ async function prepare(p) {
                 break;
             }
         }
-        if (libSceNKWebKitBase === null)
+        if (libSceNKWebKitBase === null) {
+            try {
+                scanForWkBase(p, ctor);
+            } catch (e) {
+                jbmark("SCAN-WK-ERR", "scan crashed: " + String(e));
+            }
             throw new Error("no host-constructor candidate gave a valid base (ctor=0x"
                 + ctor.toString(16) + ")");
+        }
     } else {
         jbmark("WEBKIT-BASE-VTABLE", "fw=" + window.fw_str
             + "-ctor=" + (typeof globalThis.__ps5NativeCtor === "number"
@@ -404,4 +468,5 @@ let fwScript = document.createElement('script');
 document.body.appendChild(fwScript);
 
 fwScript.setAttribute('src', `../offsets/${window.fw_str}.js?v=final`);
+
 
